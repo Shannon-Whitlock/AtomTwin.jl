@@ -1,0 +1,118 @@
+# # Rabi oscillations with atomic motion
+#
+# In this example we simulate Rabi oscillations of a single atom trapped in a
+# tweezer, including its thermal motion in the trap.
+#
+# The atom is initialized with a Maxwell–Boltzmann velocity distribution, and
+# we monitor both the internal excited–state population and the motional
+# degrees of freedom during a resonant Rabi pulse.
+
+# Internal notes for test scripts (not included in docs/examples):         #src
+# - Files in `test/examples_src/` are run as tests and also used to        #src
+#   generate docs and runnable examples.                                   #src
+# - Lines containing `#src` are removed by `make.jl` when generating       #src
+#   docs/examples, but are present when running tests.                     #src
+# - To omit a line from tests but keep it in docs/examples, wrap it in     #src
+#   an `if false ... end` block that is itself tagged with `#src`:         #src
+#                                                                          #src
+#       if false            #src                                           #src
+#           using Plots     # omitted in tests, kept in docs/examples      #src
+#       end                 #src                                           #src
+
+using AtomTwin
+using AtomTwin.Units
+using StatsBase
+if false      #src
+using Plots
+end           #src
+
+# ## Parameters
+
+Ω              = 2π * 0.05MHz   # Rabi frequency (rad/s)
+temperature    = 5µK           # Initial temperature (K)
+
+pulse_duration = 200µs          # Pulse duration (s)
+dt             = 10ns            # Time step (s)
+
+descriptor = "Rabi with motion: Ω/2π = $(Ω/2π/1e6) MHz, T = $(temperature*1e6) µK" #src
+
+# ## System construction
+#
+# We construct a simple two–level atom (|g⟩, |e⟩) and load it into a single
+# tweezer site, with motional degrees of freedom determined by the trap
+# parameters and the thermal velocity distribution.
+
+# Two-level atom with thermal velocity distribution
+g, e = Level("1S0"), Level("3P0")
+atom = Ytterbium171Atom(;
+    levels = [g, e],
+    x_init = [0.0, 0.0, 0.0],
+    v_init = maxwellboltzmann(T = temperature),
+)
+
+if false #src
+display(atom)
+end #src
+
+# Single-site tweezer array with specified geometry and powers
+tweezer = GaussianBeam(
+    λ    = 759nm,
+    w0   = 1.0µm,
+    P   = 50mW
+)
+
+# Resonant planar beam driving the |g⟩ ↔ |e⟩ transition
+beam = PlanarBeam(578e-9, 1.0, [1.0, 0.0, 0.0], [0, 1, 0])
+
+# Build the full system and add a coherent coupling between |g⟩ and |e⟩
+system   = System(atom, tweezer)
+coupling = add_coupling!(system, atom, g => e, Ω; beam = beam, active = false)
+
+# ## Build Sequence
+#
+# We measure the excited–state population as well as the atomic motion in the
+# transverse directions, while applying a single resonant pulse.
+
+add_detector!(system, PopulationDetectorSpec(atom, e; name = "P_e"))
+add_detector!(system, MotionDetectorSpec(atom; dims = [1, 2], name = "atom"))
+
+seq = Sequence(dt)
+@sequence seq begin
+    Pulse(coupling, pulse_duration)
+end
+
+# ## Run simulations
+runtime = @elapsed begin                                    #src
+out = play(system, seq; initial_state = g, shots = 100)
+end                                                         #src
+checksum_data  = out.detectors["P_e"][:,1]                  #src
+
+# ## Plot results
+#
+# The plot shows the individual quantum trajectories (red, faint) and their
+# mean excited–state population as a function of time (black line).
+if false                                                    #src
+tlist = out.times
+plt = Plots.plot(
+    tlist .* 1e6,
+    out.detectors["P_e"],
+    label     = "",
+    xlabel    = "Time (μs)",
+    ylabel    = "Population",
+    title     = "Rabi oscillations with atomic motion",
+    linewidth = 0.2,
+    alpha     = 0.1,
+    color     = :red,
+    legend    = :none,
+)
+
+Plots.plot!(
+    plt,
+    tlist .* 1e6,
+    mean(out.detectors["P_e"], dims = 2),
+    color     = :black,
+    linewidth = 3,
+)
+
+plt
+end                                                         #src

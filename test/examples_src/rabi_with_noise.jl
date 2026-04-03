@@ -1,0 +1,134 @@
+# # Rabi oscillations with laser phase noise
+#
+# In this example we simulate Rabi oscillations of a single two–level atom
+# driven by a resonant field subject to laser phase noise.
+#
+# In addition to the coherent drive, a frequency–dependent phase noise
+# spectrum is applied via `LaserPhaseNoiseModel`. The example shows how
+# this noise damps the Rabi oscillations compared to the ideal coherent case.
+
+# Internal notes for test scripts (not included in docs/examples):         #src
+# - Files in `test/examples_src/` are run as tests and also used to        #src
+#   generate docs and runnable examples.                                   #src
+# - Lines containing `#src` are removed by `make.jl` when generating       #src
+#   docs/examples, but are present when running tests.                     #src
+# - To omit a line from tests but keep it in docs/examples, wrap it in     #src
+#   an `if false ... end` block that is itself tagged with `#src`:         #src
+#                                                                          #src
+#       if false            #src                                           #src
+#           using Plots     # omitted in tests, kept in docs/examples      #src
+#       end                 #src                                           #src
+
+using AtomTwin
+using StatsBase  
+if false            #src
+using Plots      
+end                 #src
+
+# ## Parameters and Noise
+# 
+# For the noise model we take a common model consisting of white noise
+# plus a servo bump
+
+Ω              = 2π * 1e6      # Rabi frequency (rad/s)
+pulse_duration = 10e-6         # Total pulse duration (s)
+
+dt             = 1e-9          # Time step (s)
+shots          = 100           # Number of quantum trajectories
+
+descriptor = "Rabi with noise: Ω/2π = $(Ω/2π/1e6) MHz, shots = $(shots)" #src
+
+noise_model = LaserPhaseNoiseModel(
+    bump_ampl      = 2.0e5,
+    bump_center    = 1.0e6,
+    bump_width     = 2e5,
+    powerlaw_ampl  = 0.25e5,
+)
+
+if false #src
+noise_spectrum = Plots.plot(noise_model; fmin = 0.05e6, fmax = 4e6)
+end      #src
+
+# ## System construction
+#
+# Simple two-level atom
+g, e = Level("g"), Level("e")
+atom = Atom(; levels = [g, e])
+
+system = System(atom)
+
+# Add a resonant coupling and attach the noise model
+coupling = add_coupling!(
+    system, atom, g => e, Ω;
+    noise  = noise_model,
+    active = false,
+)
+
+# ## Build Sequence
+# Add detectors for the population and the field amplitude
+
+add_detector!(system, PopulationDetectorSpec(atom, e; name = "P_e"))
+add_detector!(system, FieldDetectorSpec(coupling; name = "coupling"))
+
+# Build the sequence and play the simulation using quantum trajectories
+seq = Sequence(dt)
+@sequence seq begin
+    Pulse(coupling, pulse_duration)
+end
+
+
+# ## Run simulations
+runtime = @elapsed begin                                    #src
+out = play(system, seq; initial_state = g, shots = shots)
+end                                                         #src
+checksum_data  = out.detectors["P_e"][:,1]                  #src
+
+# ## Plot results
+#
+# We can compare against an analytical model for the damping rate from
+# X. Jiang et al., PRA 107, 042611 (2023)
+if false   #src
+tlist      = out.times                 # Time grid (s)
+t_us       = tlist .* 1e6              # Convert to microseconds
+P_excited  = out.detectors["P_e"]      # Trajectory-resolved populations
+
+h0    = noise_model.powerlaw_ampl
+hg    = noise_model.bump_ampl
+fg    = noise_model.bump_center
+sigma = noise_model.bump_width
+
+Gamma = 0.5 * (
+    h0 +
+    hg * exp(-(Ω/2π - fg)^2 / (2 * sigma^2)) +
+    hg * exp(-(Ω/2π + fg)^2 / (2 * sigma^2))
+)
+
+# Create a plot showing:
+#   - Individual noisy trajectories (red, faint)
+#   - Trajectory-averaged population (black)
+#   - Simple analytical damping model (blue)
+
+plt = Plots.plot(
+        t_us, P_excited;
+        label      = "",
+        xlabel     = "Time (μs)",
+        ylabel     = "Excited-state population",
+        title      = "Rabi oscillations with laser phase noise",
+        linewidth  = 0.2,
+        alpha      = 0.1,
+        color      = :red,
+        legend     = :none,
+     )
+
+Plots.plot!(plt, t_us, mean(P_excited, dims = 2);
+        color = :black,
+        linewidth = 3,
+        label = "Quantum trajectories (mean)")
+
+Plots.plot!(plt, t_us, 0.5 .+ 0.5 .* exp.(-Gamma .* tlist);
+        color = :blue,
+        linewidth = 3,
+        label = "Analytical damping model")
+
+plt
+end     #src
