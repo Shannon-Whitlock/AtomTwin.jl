@@ -56,10 +56,10 @@ function build_detector(spec::DetectorSpec,
 
     if spec.kind === PopulationDetector
         return PopulationDetector(
-            system.state[], 
-            system.basis, 
+            system.state[],
+            system.basis,
             obj.inner, # use NLevelAtom ref
-            p.level, 
+            p.level,
             tspan,  # view into global tspan
             vals;   # view into detector-specific vals array
             name = p.name

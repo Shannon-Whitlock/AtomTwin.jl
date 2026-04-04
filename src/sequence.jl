@@ -15,6 +15,7 @@ dynamics.
   instructions in the sequence
 - `dt` – base time step used to interpret instruction durations
   (typically a `Float64` in seconds or an application-specific time unit)
+- `downsample::Int` – record detector output every nth solver step (default 1)
 
 Sequences are usually constructed via the convenience constructor
 
@@ -25,21 +26,31 @@ which creates an empty sequence with the given time step.
 struct Sequence
     instructions::Vector{AbstractInstruction}
     dt::Float64
+    downsample::Int  # record every nth step (1 = every step)
 end
 
 """
-    Sequence(dt::Float64)
+    Sequence(dt::Float64; downsample::Int = 1)
 
 Create an empty `Sequence` with time step `dt` and no instructions.
 
-This is the recommended constructor to start building a new instruction
-sequence, e.g.
+`downsample` controls how often detector output is recorded: every `downsample`-th
+solver step is written, so all detector arrays and `job.times` have length
+`t_steps ÷ downsample` instead of `t_steps`. The quantum integrator still runs
+at full `dt`; only the output is thinned. Applies uniformly to all detector types
+(`PopulationDetector`, `CoherenceDetector`, `MotionDetector`, `FieldDetector`).
 
-`seq = Sequence(1.0e-9) # 1 ns base time step`
+Use when a small `dt` is required for accuracy but full-resolution output is not
+needed, e.g. when the interaction frequency greatly exceeds the observable bandwidth:
+
+```julia
+seq = Sequence(dt; downsample=100)  # record every 100th step
+```
 """
-function Sequence(dt::Float64)
+function Sequence(dt::Float64; downsample::Int = 1)
     dt > 0 || throw(ArgumentError("dt must be positive, got $dt"))
-    return Sequence(AbstractInstruction[], dt)
+    downsample > 0 || throw(ArgumentError("downsample must be positive, got $downsample"))
+    return Sequence(AbstractInstruction[], dt, downsample)
 end
 
 """

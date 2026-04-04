@@ -502,28 +502,28 @@ function tdse(psi::Vector{ComplexF64},
               modifiers::Vector{<:AbstractModifier} = AbstractModifier[],
               detectors::Vector{<:AbstractDetector} = AbstractDetector[],
               order::Int                         = 4,
+              downsample::Int                    = 1,
               _q1::Vector{ComplexF64}            = copy(psi),
               _q2::Vector{ComplexF64}            = copy(psi))
 
     steps = length(tspan)
     dt    = tspan[2] - tspan[1]
     for i in 1:steps
-        # Update time-dependent modifiers
         for m in modifiers
             update!(m, i)
         end
-                
-        # Update spatially-dependent field coefficients
         for f in fields
             update!(f, i)
         end
-
         fquantum!(dt, psi, H, _q1, _q2; order = order)
-        for d in detectors
-            if d isa PopulationDetector
-                prep!(d)  # update atom population
+        if i % downsample == 0
+            i_out = i ÷ downsample
+            for d in detectors
+                if d isa PopulationDetector
+                    prep!(d)
+                end
+                write!(d, i_out)
             end
-            write!(d, i)
         end
     end
 end
@@ -545,6 +545,7 @@ function tdse_semiclassical(psi::Vector{ComplexF64},
                             modifiers::Vector{<:AbstractModifier} = AbstractModifier[],
                             detectors::Vector{<:AbstractDetector} = AbstractDetector[],
                             order::Int                          = 4,
+                            downsample::Int                     = 1,
                             _q1::Vector{ComplexF64}             = copy(psi),
                             _q2::Vector{ComplexF64}             = copy(psi)) where {A}
 
@@ -552,28 +553,24 @@ function tdse_semiclassical(psi::Vector{ComplexF64},
     dt    = tspan[2] - tspan[1]
 
     for i in 1:steps
-        # Update time-dependent modifiers
         for m in modifiers
             update!(m, i)
         end
-
-        # Classical atomic motion
         @batch for atom in atoms
             fclassical!(dt, atom, beams)
         end
-
-        # Update spatially dependent field coefficients (e.g. PlanarCoupling)
         for f in fields
             update!(f, i)
         end
-
         fquantum!(dt, psi, H, _q1, _q2; order = order)
-
-        for d in detectors
-            if d isa PopulationDetector
-                prep!(d)
+        if i % downsample == 0
+            i_out = i ÷ downsample
+            for d in detectors
+                if d isa PopulationDetector
+                    prep!(d)
+                end
+                write!(d, i_out)
             end
-            write!(d, i)
         end
     end
 end
@@ -681,6 +678,7 @@ function newton(atoms::Vector{A},
                 beams::Vector{<:AbstractBeam}     = AbstractBeam[],
                 modifiers::Vector{<:AbstractModifier} = AbstractModifier[],
                 detectors::Vector{<:AbstractDetector} = AbstractDetector[],
+                downsample::Int                   = 1,
                 kwargs...) where {A}
 
     steps = length(tspan)
@@ -692,7 +690,6 @@ function newton(atoms::Vector{A},
         for m in modifiers
             update!(m, i)
         end
-
         if parallel
             @batch for atom in atoms
                 fclassical!(dt, atom, beams)
@@ -702,9 +699,11 @@ function newton(atoms::Vector{A},
                 fclassical!(dt, atom, beams)
             end
         end
-
-        for d in detectors
-            write!(d, i)
+        if i % downsample == 0
+            i_out = i ÷ downsample
+            for d in detectors
+                write!(d, i_out)
+            end
         end
     end
 end
@@ -736,65 +735,52 @@ function wfmc(psi::Vector{ComplexF64},
               modifiers::Vector{<:AbstractModifier}   = AbstractModifier[],
               detectors::Vector{<:AbstractDetector}   = AbstractDetector[],
               order::Int                               = 4,
+              downsample::Int                          = 1,
               _q1::Vector{ComplexF64}                  = copy(psi),
               _q2::Vector{ComplexF64}                  = copy(psi),
               rng = Random.MersenneTwister())
 
-              
     steps = length(tspan)
     dt    = tspan[2] - tspan[1]
 
-    # Temporary probability weights for jump selection
     _prob = Weights(zeros(length(jumps)))
 
-    # Hoist constant checks outside loop
-    has_modifiers = !isempty(modifiers)
-    has_fields = !isempty(fields)
-    has_detectors = !isempty(detectors)
-    
-    # Pre-check if any detector is PopulationDetector (avoid type dispatch in loop)
+    has_modifiers  = !isempty(modifiers)
+    has_fields     = !isempty(fields)
+    has_detectors  = !isempty(detectors)
     prep_detectors = [d for d in detectors if d isa PopulationDetector]
-    has_prep = !isempty(prep_detectors)
-    
+    has_prep       = !isempty(prep_detectors)
+
     @inbounds for i in 1:steps
-        # Update time-dependent modifiers
         if has_modifiers
             for m in modifiers
                 update!(m, i)
             end
         end
-
-        # Update spatially-dependent field coefficients
         if has_fields
             for f in fields
                 update!(f, i)
             end
         end
-        
         fquantum!(dt, psi, H, Hnh, _q1, _q2; order = order)
         n = norm(psi)
         if n^2 < rand(rng)
             jump!(psi, jumps, _prob, _q1, _q2, rng)
             n = norm(psi)
         end
-        
-        # Single division instead of broadcast
         inv_n = 1.0 / n
         @simd for k in eachindex(psi)
             psi[k] *= inv_n
         end
-        
-        # Prep only PopulationDetectors
-        if has_prep
-            for d in prep_detectors
-                prep!(d)
+        if has_detectors && i % downsample == 0
+            i_out = i ÷ downsample
+            if has_prep
+                for d in prep_detectors
+                    prep!(d)
+                end
             end
-        end
-        
-        # Write all detectors
-        if has_detectors
             for d in detectors
-                write!(d, i)
+                write!(d, i_out)
             end
         end
     end
@@ -838,6 +824,7 @@ function wfmc_semiclassical(psi::Vector{ComplexF64},
                             fields::Vector{<:AbstractField}       = AbstractField[],
                             detectors::Vector{<:AbstractDetector} = AbstractDetector[],
                             order::Int                             = 4,
+                            downsample::Int                        = 1,
                             _q1::Vector{ComplexF64}                = copy(psi),
                             _q2::Vector{ComplexF64}                = copy(psi),
                             rng=Random.MersenneTwister()) where {A}
@@ -848,42 +835,36 @@ function wfmc_semiclassical(psi::Vector{ComplexF64},
     _prob = Weights(zeros(length(jumps)))
 
     for i in 1:steps
-        # Update time-dependent modifiers
         for m in modifiers
             update!(m, i)
         end
-
-        # Update motional degrees of freedom
         for atom in atoms
             updatepop!(atom, psi)
             fclassical!(dt, atom, beams)
             fdipole!(dt, psi, atom, fields, jumps, _q1)
         end
-
-        # Update spatially-dependent field coefficients (PlanarCoupling)
         for f in fields
             update!(f, i)
         end
-
         fquantum!(dt, psi, H, Hnh, _q1, _q2; order = order)
-
-        # Stochastic jumps
         n = norm(psi)
         if n^2 < rand(rng)
             jump = jump!(psi, jumps, _prob, _q1, _q2, rng)
             recoil!(jump, rng)
             for d in jump.detectors
-                write!(d, i)
+                write!(d, i)  # photo events are not downsampled
             end
             n = norm(psi)
         end
         psi ./= n
-
-        for d in detectors
-            if d isa PopulationDetector
-                prep!(d)
+        if i % downsample == 0
+            i_out = i ÷ downsample
+            for d in detectors
+                if d isa PopulationDetector
+                    prep!(d)
+                end
+                write!(d, i_out)
             end
-            write!(d, i)
         end
     end
 end
@@ -912,6 +893,7 @@ function qme(rho::Matrix{ComplexF64},
              modifiers::Vector{<:AbstractModifier} = AbstractModifier[],
              detectors::Vector{<:AbstractDetector} = AbstractDetector[],
              order::Int                             = 4,
+             downsample::Int                        = 1,
              _q1::Matrix{ComplexF64}                = copy(rho),
              _q2::Matrix{ComplexF64}                = copy(rho),
              rng = Random.MersenneTwister())
@@ -920,23 +902,21 @@ function qme(rho::Matrix{ComplexF64},
     dt    = tspan[2] - tspan[1]
 
     for i in 1:steps
-        # Update time-dependent modifiers
         for m in modifiers
             update!(m, i)
         end
-
-        # Update spatially-dependent field coefficients
         for f in fields
             update!(f, i)
         end
-
         fquantum!(dt, rho, L, J, _q1, _q2; order = order)
-
-        for d in detectors
-            if d isa PopulationDetector
-                prep!(d)
+        if i % downsample == 0
+            i_out = i ÷ downsample
+            for d in detectors
+                if d isa PopulationDetector
+                    prep!(d)
+                end
+                write!(d, i_out)
             end
-            write!(d, i)
         end
     end
 end
@@ -960,6 +940,7 @@ function qme_semiclassical(rho::Matrix{ComplexF64},
                            modifiers::Vector{<:AbstractModifier} = AbstractModifier[],
                            detectors::Vector{<:AbstractDetector} = AbstractDetector[],
                            order::Int                             = 4,
+                           downsample::Int                        = 1,
                            _q1::Matrix{ComplexF64}                = copy(rho),
                            _q2::Matrix{ComplexF64}                = copy(rho),
                            rng=Random.MersenneTwister()) where {A}
@@ -968,29 +949,24 @@ function qme_semiclassical(rho::Matrix{ComplexF64},
     dt    = tspan[2] - tspan[1]
 
     for i in 1:steps
-        # Update time-dependent modifiers
         for m in modifiers
             update!(m, i)
         end
-
-        # Classical atomic motion
         @batch for atom in atoms
             fclassical!(dt, atom, beams)
         end
-
-        # Update spatially-dependent field coefficients
         for f in fields
             update!(f, i)
         end
-
-        # Evolve quantum density matrix
         fquantum!(dt, rho, L, J, _q1, _q2; order = order)
-
-        for d in detectors
-            if d isa PopulationDetector
-                prep!(d)
+        if i % downsample == 0
+            i_out = i ÷ downsample
+            for d in detectors
+                if d isa PopulationDetector
+                    prep!(d)
+                end
+                write!(d, i_out)
             end
-            write!(d, i)
         end
     end
 end

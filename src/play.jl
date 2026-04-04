@@ -153,12 +153,13 @@ function play(job::SimulationJob, sys::System;
     n_detectors = length(job.detectors[1])
     det_names = [job.detectors[1][j].name for j in 1:n_detectors]
     
-    # Allocate output storage
+    # Allocate output storage (use actual vals length to support downsampled detectors)
     all_outputs_vec = [
         let single_shot_vals = job.detectors[1][j].vals
+            n = size(single_shot_vals, 1)
             ndims(single_shot_vals) == 1 ?
-                zeros(eltype(single_shot_vals), n_times, shots) :
-                zeros(eltype(single_shot_vals), n_times, size(single_shot_vals, 2), shots)
+                zeros(eltype(single_shot_vals), n, shots) :
+                zeros(eltype(single_shot_vals), n, size(single_shot_vals, 2), shots)
         end
         for j in 1:n_detectors
     ]
@@ -239,12 +240,14 @@ function _play(job::SimulationJob;
                 rng=Random.MersenneTwister())
 
     n_instructions = length(job.modifiers)
+    ds = job.downsample
     if job.state === nothing
         # Classical evolution
         @inbounds for i in 1:n_instructions
             evolve!(job.atoms, job.local_tspans[i];
-                    beams=job.beams, modifiers=job.modifiers[i], 
-                    detectors=job.detectors[i], rng=rng, frozen=false)
+                    beams=job.beams, modifiers=job.modifiers[i],
+                    detectors=job.detectors[i], rng=rng, frozen=false,
+                    downsample=ds)
         end
     else
         # Quantum/semiclassical evolution
@@ -255,8 +258,8 @@ function _play(job::SimulationJob;
         @inbounds for i in 1:n_instructions
             evolve!((job.state, job.atoms), job.local_tspans[i];
                     fields=job.fields, beams=job.beams, jumps=job.jumps,
-                    modifiers=job.modifiers[i], detectors=job.detectors[i], 
-                    rng=rng, frozen=frozen)
+                    modifiers=job.modifiers[i], detectors=job.detectors[i],
+                    rng=rng, frozen=frozen, downsample=ds)
         end
     end
     

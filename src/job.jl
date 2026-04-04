@@ -27,9 +27,10 @@ struct SimulationJob{S}
     jumps::Vector{Jump}
     modifiers::Vector{Any}   # Vector{Vector{AbstractModifier}} — element type varies per instruction
     detectors::Vector{Any}   # Vector{Vector{<:AbstractDetector}} — element type varies per instruction
-    local_tspans::Vector     # Vector of SubArray views into times, one per instruction
+    local_tspans::Vector     # Vector of SubArray views into full time grid, one per instruction
     detector_outputs::Dict{String, Any}
-    times::Vector{Float64}
+    times::Vector{Float64}   # downsampled time grid (length = t_steps ÷ downsample)
+    downsample::Int
 end
 
 
@@ -144,60 +145,54 @@ function compile(sys::System, seq::Sequence;
 
     # === PHASE 5: BUILD DETECTORS AND OUTPUT STORAGE ===
 
-    offsets = cumsum([0; step_counts])
+    offsets  = cumsum([0; step_counts])
+    ds       = seq.downsample
+    ds_counts  = [step_counts[i] ÷ ds for i in 1:n_instructions]
+    ds_offsets = cumsum([0; ds_counts])
+    ds_total   = ds_offsets[end]
 
-    # Preallocate outputs for single shot based on detector dimensions
-    times = collect(range(dt, step=dt, length=total_tspan_size))
+    # Full time grid for solvers (views held in local_tspans keep it alive)
+    full_times   = collect(range(dt, step=dt, length=total_tspan_size))
+    local_tspans = [view(full_times, offsets[i]+1:offsets[i+1]) for i in 1:n_instructions]
+
+    # Downsampled time grid returned to the user
+    times = collect(range(dt * ds, step=dt * ds, length=ds_total))
+
     n_detectors = length(sys.detector_specs)
-    
-    detector_vals = Vector{Any}(undef, n_detectors)
 
+    detector_vals = Vector{Any}(undef, n_detectors)
     for j in 1:n_detectors
         spec = sys.detector_specs[j]
-        detector_vals[j] = spec.ndims == 1 ? 
-            zeros(spec.eltype, total_tspan_size) : 
-            zeros(spec.eltype, total_tspan_size, spec.ndims)
+        detector_vals[j] = spec.ndims == 1 ?
+            zeros(spec.eltype, ds_total) :
+            zeros(spec.eltype, ds_total, spec.ndims)
     end
 
-    # Create views for local tspans
-    local_tspans = [view(times, offsets[i]+1:offsets[i+1]) for i in 1:n_instructions]
-
-    # Build detectors for single shot with resolve_target
+    # Build detectors using downsampled tspan/vals views
     detectors = Vector{Any}(undef, n_instructions)
-
     for i in 1:n_instructions
+        ds_tspan = view(times, ds_offsets[i]+1:ds_offsets[i+1])
         _detectors = [
             begin
-                # Create appropriate view based on dimensionality
-                if ndims(detector_vals[j]) == 1
-                    vals_view = view(detector_vals[j], offsets[i]+1:offsets[i+1])
-                else
-                    vals_view = view(detector_vals[j], offsets[i]+1:offsets[i+1], :)
-                end
-                
-                build_detector(
-                    sys.detector_specs[j],
-                    local_tspans[i],
-                    vals_view,
-                    resolve_target,  # Use our resolver with shared cache
-                    sys
-                )
+                vals_slice = ds_offsets[i]+1:ds_offsets[i+1]
+                vals_view  = ndims(detector_vals[j]) == 1 ?
+                    view(detector_vals[j], vals_slice) :
+                    view(detector_vals[j], vals_slice, :)
+                build_detector(sys.detector_specs[j], ds_tspan, vals_view, resolve_target, sys)
             end
             for j in 1:n_detectors
         ]
-        
         detectors[i] = _detectors
     end
 
-    # Create output dict with views
     detector_outputs = Dict{String, Any}(
-        sys.detector_specs[j].params.name => detector_vals[j] 
+        sys.detector_specs[j].params.name => detector_vals[j]
         for j in 1:n_detectors
     )
-    
+
     return SimulationJob(qstate, atoms, resolved_beams, resolved_fields, resolved_jumps,
                         modifiers, detectors, local_tspans,
-                        detector_outputs, times)
+                        detector_outputs, times, ds)
 end
 
 
