@@ -39,6 +39,12 @@ configurations built from multiple beams or modes.
 """
 abstract type AbstractField end  # can be static or time-dependent
 
+# Default no-op: subtypes that don't need per-step updates inherit this.
+# Explicit return Nothing ensures a uniform inferred return type across all
+# AbstractField subtypes, preventing boxing when dispatching through the
+# abstract type (e.g. in `for f in fields; update!(f, i); end`).
+update!(::AbstractField, ::Int) = nothing
+
 """
 base_coupling(coupling::AbstractField)
 

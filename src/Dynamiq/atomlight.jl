@@ -127,6 +127,7 @@ function update!(drive::PlanarCoupling{A}, i::Int) where A
     k = drive.beam.k
     r = drive.atom.x
     drive._coeff[] = cis(k[1] * r[1] + k[2] * r[2] + k[3] * r[3])
+    return nothing
 end
 
 """
@@ -255,6 +256,7 @@ intensity at the atomic position. The stored coefficient is
 """
 function update!(f::StarkShiftAC{A}, i::Int) where A
     f._coeff[] = 1 / hbar * f.alpha * intensity(f.beam, f.atom.x)
+    return nothing
 end
 
 """

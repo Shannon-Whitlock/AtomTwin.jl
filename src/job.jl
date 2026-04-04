@@ -23,7 +23,7 @@ struct SimulationJob{S}
     state::S
     atoms::Vector{NLevelAtom}
     beams::Vector{AbstractBeam}
-    fields::Vector{Dynamiq.AbstractField}
+    fields::Vector{<:Dynamiq.AbstractField}
     jumps::Vector{Jump}
     modifiers::Vector{Any}   # Vector{Vector{AbstractModifier}} — element type varies per instruction
     detectors::Vector{Any}   # Vector{Vector{<:AbstractDetector}} — element type varies per instruction
@@ -101,6 +101,7 @@ function compile(sys::System, seq::Sequence;
             push!(resolved_jumps, obj)
         end
     end
+    resolved_fields = [obj for obj in resolved_fields]   # eltype inferred from content
 
     # Create global time reference for noisy fields
     global_time_ref = Ref(0.0)

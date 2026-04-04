@@ -509,6 +509,11 @@ function tdse(psi::Vector{ComplexF64},
         for m in modifiers
             update!(m, i)
         end
+                
+        # Update spatially-dependent field coefficients
+        for f in fields
+            update!(f, i)
+        end
 
         fquantum!(dt, psi, H, _q1, _q2; order = order)
         for d in detectors
