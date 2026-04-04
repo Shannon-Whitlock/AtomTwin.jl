@@ -98,6 +98,8 @@ function compile(sys::System, seq::Sequence;
         if obj isa AtomTwin.Dynamiq.AbstractField
             push!(resolved_fields, obj)
         elseif obj isa Jump
+            AtomTwin.Dynamiq.precompute!(obj, Vector)
+            AtomTwin.Dynamiq.precompute!(obj, Matrix)
             push!(resolved_jumps, obj)
         end
     end
@@ -245,7 +247,10 @@ function recompile!(job::SimulationJob, sys::System;
             recompile_node!(node, job.fields[field_counter], rng, param_values)
         elseif obj isa Jump
             jump_counter += 1
-            recompile_node!(node, job.jumps[jump_counter], rng, param_values)
+            # recompiling jumps is expensive
+            #recompile_node!(node, job.jumps[jump_counter], rng, param_values)
+            #AtomTwin.Dynamiq.precompute!(obj, Vector)
+            #AtomTwin.Dynamiq.precompute!(obj, Matrix)
         end
     end
 

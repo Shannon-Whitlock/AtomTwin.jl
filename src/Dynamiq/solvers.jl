@@ -410,10 +410,10 @@ function evolve!(state::Tuple{Matrix{ComplexF64},Vector{<:NLevelAtom}},
                  frozen::Bool                     = true,
                  kwargs...)
     ρ, atoms = state
-
-    # Precompute jump data (L†L diagonals) for density-matrix propagation
     for j in jumps
-        precompute!(j, Matrix)
+        if isnothing(j.LdagL_diag)
+            precompute!(j, Matrix)
+        end
     end
 
     # Build Hamiltonian and Lindblad structures
@@ -449,9 +449,11 @@ function evolve!(state::Tuple{Vector{ComplexF64},Vector{<:NLevelAtom}},
     
     # Precompute jump helpers for state-vector propagation
     for j in jumps
-        precompute!(j, Vector)
+        if isnothing(j.Hnh)
+            precompute!(j, Vector)
+        end
     end
-
+    
     psi, atoms = state
     if length(jumps) == 0
         # Schrödinger dynamics
@@ -477,6 +479,7 @@ function evolve!(state::Tuple{Vector{ComplexF64},Vector{<:NLevelAtom}},
             return
         end
     end
+    
 end
 
 #------------------------------------------------------------------------------
@@ -737,6 +740,7 @@ function wfmc(psi::Vector{ComplexF64},
               _q2::Vector{ComplexF64}                  = copy(psi),
               rng = Random.MersenneTwister())
 
+              
     steps = length(tspan)
     dt    = tspan[2] - tspan[1]
 
@@ -751,7 +755,7 @@ function wfmc(psi::Vector{ComplexF64},
     # Pre-check if any detector is PopulationDetector (avoid type dispatch in loop)
     prep_detectors = [d for d in detectors if d isa PopulationDetector]
     has_prep = !isempty(prep_detectors)
-
+    
     @inbounds for i in 1:steps
         # Update time-dependent modifiers
         if has_modifiers
